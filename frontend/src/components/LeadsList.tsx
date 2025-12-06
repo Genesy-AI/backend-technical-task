@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { api } from '../api'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
+import { AxiosError } from 'axios'
 
 export const LeadsList: FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
@@ -46,8 +47,14 @@ export const LeadsList: FC = () => {
           : `Verified ${data.verifiedCount} emails`
       )
     },
-    onError: () => {
-      toast.error('Failed to verify emails. Please try again.')
+    onError: (error: AxiosError) => {
+      const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')
+
+      if (isTimeout) {
+        toast.error('Email verification timed out. Some emails may take longer to verify. Please try again.')
+      } else {
+        toast.error('Failed to verify emails. Please try again.')
+      }
     }
   })
 
@@ -148,14 +155,22 @@ export const LeadsList: FC = () => {
                       </div>
                     </button>
                     <button
-                      onClick={() => verifyEmailsMutation.mutate(selectedLeads)}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        onClick={() => verifyEmailsMutation.mutate(selectedLeads)}
+                        disabled={verifyEmailsMutation.isPending}
+                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <div className="flex items-center">
-                        <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12H8m8 0a8 8 0 11-16 0 8 8 0 0116 0zm-8 0V4" />
-                        </svg>
-                        Verify Email
+                          {verifyEmailsMutation.isPending ? (
+                              <svg className="mr-3 h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                          ) : (
+                              <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12H8m8 0a8 8 0 11-16 0 8 8 0 0116 0zm-8 0V4" />
+                              </svg>
+                          )}
+                          {verifyEmailsMutation.isPending ? 'Verifying...' : 'Verify Email'}
                       </div>
                     </button>
                     <button
