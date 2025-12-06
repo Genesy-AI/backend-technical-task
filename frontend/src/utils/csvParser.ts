@@ -1,4 +1,5 @@
 import Papa from 'papaparse'
+import COUNTRY_CODES from './CountryCodes'
 
 export interface CsvLead {
   firstName: string
@@ -10,6 +11,12 @@ export interface CsvLead {
   isValid: boolean
   errors: string[]
   rowIndex: number
+}
+
+const isValidCountry = (countryCode: string | undefined): boolean => {
+  return typeof countryCode === 'string'
+    ? COUNTRY_CODES.map((s) => s.toLowerCase()).includes(countryCode.toLowerCase())
+    : false;
 }
 
 export const isValidEmail = (email: string): boolean => {
@@ -68,7 +75,7 @@ export const parseCsv = (content: string): CsvLead[] => {
           lead.jobTitle = trimmedValue || undefined
           break
         case 'countrycode':
-          lead.countryCode = trimmedValue || undefined
+          lead.countryCode = isValidCountry(trimmedValue) ? trimmedValue : ""
           break
         case 'companyname':
           lead.companyName = trimmedValue || undefined
