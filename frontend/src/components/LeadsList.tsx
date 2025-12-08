@@ -1,15 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FC, useState } from 'react'
+import { FC, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { api } from '../api'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
+import { AxiosError } from 'axios'
 
 export const LeadsList: FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false)
   const [isEnrichDropdownOpen, setIsEnrichDropdownOpen] = useState(false)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+  const [phoneJobProgress, setPhoneJobProgress] = useState<{
+    jobId: string
+    total: number
+    completed: number
+    progress: number
+} | null>(null)
   const queryClient = useQueryClient()
 
   const leads = useQuery({
@@ -34,6 +41,69 @@ export const LeadsList: FC = () => {
       toast.error('Failed to delete leads. Please try again.')
     }
   })
+  
+  const findLeadsPhoneMutation = useMutation({
+    mutationFn: async (ids: number[]) => api.leads.findPhones({ leadIds: ids }),
+    onSuccess: (data) => {
+        setIsEnrichDropdownOpen(false)
+        
+        // Start polling for progress
+        setPhoneJobProgress({
+            jobId: data.jobId,
+            total: data.total,
+            completed: 0,
+            progress: 0,
+        })
+
+        toast.success(`Started finding phones for ${data.total} leads`)
+    },
+    onError: () => {
+        toast.error('Failed to start phone finding. Please try again.')
+    }
+  })
+
+  useEffect(() => {
+    if (!phoneJobProgress) return
+
+    // Every 2s get the task status, only invalidate the leads once that has completed
+    const pollInterval = setInterval(async () => {
+        try {
+            const status = await api.leads.findPhonesStatus({ jobId: phoneJobProgress.jobId })
+
+            setPhoneJobProgress({
+                jobId: status.jobId,
+                total: status.total,
+                completed: status.completed,
+                progress: status.progress,
+            })
+
+            if (status.status === 'completed') {
+                clearInterval(pollInterval)
+                queryClient.invalidateQueries({ queryKey: ['leads', 'getMany'] })
+                const successCount = status.results.filter(r => {
+                  const digits = (r.telephoneNumber || '').replace(/\D/g, '');
+                  return digits !== '';
+                }).length
+                toast.success(
+                    `Completed! Found ${successCount} phone${successCount !== 1 ? 's' : ''} out of ${status.total} leads`
+                )
+                
+                if (status.errors.length > 0) {
+                    toast.error(`${status.errors.length} leads had errors`)
+                }
+                
+                setPhoneJobProgress(null)
+            }
+        } catch (error) {
+            console.error('Error polling job status:', error)
+            clearInterval(pollInterval)
+            setPhoneJobProgress(null)
+            toast.error('Lost connection to job. Please refresh.')
+        }
+    }, 2000)
+
+    return () => clearInterval(pollInterval)
+  }, [phoneJobProgress, queryClient])
 
   const verifyEmailsMutation = useMutation({
     mutationFn: async (ids: number[]) => api.leads.verifyEmails({ leadIds: ids }),
@@ -46,8 +116,14 @@ export const LeadsList: FC = () => {
           : `Verified ${data.verifiedCount} emails`
       )
     },
-    onError: () => {
-      toast.error('Failed to verify emails. Please try again.')
+    onError: (error: AxiosError) => {
+      const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')
+
+      if (isTimeout) {
+        toast.error('Email verification timed out. Some emails may take longer to verify. Please try again.')
+      } else {
+        toast.error('Failed to verify emails. Please try again.')
+      }
     }
   })
 
@@ -148,14 +224,22 @@ export const LeadsList: FC = () => {
                       </div>
                     </button>
                     <button
-                      onClick={() => verifyEmailsMutation.mutate(selectedLeads)}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        onClick={() => verifyEmailsMutation.mutate(selectedLeads)}
+                        disabled={verifyEmailsMutation.isPending}
+                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <div className="flex items-center">
-                        <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12H8m8 0a8 8 0 11-16 0 8 8 0 0116 0zm-8 0V4" />
-                        </svg>
-                        Verify Email
+                          {verifyEmailsMutation.isPending ? (
+                              <svg className="mr-3 h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                          ) : (
+                              <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12H8m8 0a8 8 0 11-16 0 8 8 0 0116 0zm-8 0V4" />
+                              </svg>
+                          )}
+                          {verifyEmailsMutation.isPending ? 'Verifying...' : 'Verify Email'}
                       </div>
                     </button>
                     <button
@@ -170,6 +254,17 @@ export const LeadsList: FC = () => {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                         </svg>
                         Guess Gender
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => findLeadsPhoneMutation.mutate(selectedLeads)}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center">
+                        <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.6 17.6 0 0 0 4.168 6.608 17.6 17.6 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.68.68 0 0 0-.58-.122l-2.19.547a1.75 1.75 0 0 1-1.657-.459L5.482 8.062a1.75 1.75 0 0 1-.46-1.657l.548-2.19a.68.68 0 0 0-.122-.58zM1.884.511a1.745 1.745 0 0 1 2.612.163L6.29 2.98c.329.423.445.974.315 1.494l-.547 2.19a.68.68 0 0 0 .178.643l2.457 2.457a.68.68 0 0 0 .644.178l2.189-.547a1.75 1.75 0 0 1 1.494.315l2.306 1.794c.829.645.905 1.87.163 2.611l-1.034 1.034c-.74.74-1.846 1.065-2.877.702a18.6 18.6 0 0 1-7.01-4.42 18.6 18.6 0 0 1-4.42-7.009c-.362-1.03-.037-2.137.703-2.877z"/>
+                        </svg>
+                        Find Phones
                       </div>
                     </button>
                   </div>
@@ -203,6 +298,29 @@ export const LeadsList: FC = () => {
         </div>
       </div>
 
+      {phoneJobProgress && (
+        <div className="px-6 py-4 bg-blue-50 border-b border-blue-200">
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="text-sm font-medium text-blue-900">
+                        Finding phones... ({phoneJobProgress.completed}/{phoneJobProgress.total})
+                    </span>
+                </div>
+                <span className="text-sm text-blue-700">{phoneJobProgress.progress}%</span>
+            </div>
+            <div className="w-full bg-blue-200 rounded-full h-2">
+                <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${phoneJobProgress.progress}%` }}
+                />
+            </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -224,6 +342,9 @@ export const LeadsList: FC = () => {
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Email
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                  Telephone
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Job Title
@@ -265,6 +386,9 @@ export const LeadsList: FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.email || '-'} {lead.emailVerified === null ? '❓' : lead.emailVerified ? '✅' : '❌'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{lead.telephoneNumber || '-'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{lead.jobTitle || '-'}</div>

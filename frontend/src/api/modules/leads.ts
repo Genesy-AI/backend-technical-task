@@ -8,6 +8,7 @@ import { LeadsUpdateInput, LeadsUpdateOutput } from '../types/leads/update'
 import { LeadsBulkImportInput, LeadsBulkImportOutput } from '../types/leads/bulkImport'
 import { LeadsVerifyEmailsInput, LeadsVerifyEmailsOutput } from '../types/leads/verifyEmails'
 import { ApiModule, endpoint } from '../utils'
+import { LeadsFindPhonesInput, LeadsFindPhonesOutput, LeadsFindPhonesStatusOutput } from '../types/leads/findPhones'
 
 export const leadsApi = {
   getMany: endpoint<LeadsGetManyOutput, LeadsGetManyInput>('get', '/leads'),
@@ -22,4 +23,9 @@ export const leadsApi = {
   ),
   bulkImport: endpoint<LeadsBulkImportOutput, LeadsBulkImportInput>('post', '/leads/bulk'),
   verifyEmails: endpoint<LeadsVerifyEmailsOutput, LeadsVerifyEmailsInput>('post', '/leads/verify-emails'),
+  findPhones: endpoint<LeadsFindPhonesOutput, LeadsFindPhonesInput>('post', '/leads/find-phones'),
+  findPhonesStatus: endpoint<LeadsFindPhonesStatusOutput, { jobId: string }>(
+    'get',
+    ({ jobId }) => `/leads/find-phones/${jobId}`
+  ),
 } as const satisfies ApiModule
