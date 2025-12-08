@@ -12,6 +12,10 @@ export async function runTemporalWorker() {
       taskQueue: 'myQueue',
       workflowsPath: require.resolve('./workflows'),
       activities,
+      maxConcurrentActivityTaskExecutions: 10,
+      maxConcurrentWorkflowTaskExecutions: 100,
+      // not the best option?
+      // maxActivitiesPerSecond: 1
     })
 
     await worker.run()
